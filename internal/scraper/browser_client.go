@@ -90,12 +90,10 @@ func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResu
 	}
 
 	// Wait for page to load
-	err = page.Timeout(timeout).WaitStable(time.Second)
+	err = page.Timeout(timeout).WaitStable(500 * time.Millisecond)
 	if err != nil {
 		log.Printf("⚠️ WaitStable timeout, continuing: %v", err)
 	}
-
-	page.Timeout(timeout).MustWaitLoad()
 
 	// Check for Cloudflare challenge
 	title := page.MustEval(`() => document.title`).String()
@@ -104,10 +102,10 @@ func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResu
 	if title == "Just a moment..." {
 		log.Printf("⏳ Cloudflare challenge detected, waiting...")
 
-		for i := 0; i < 15; i++ {
-			time.Sleep(2 * time.Second)
+		for i := 0; i < 30; i++ {
+			time.Sleep(1 * time.Second)
 			title = page.MustEval(`() => document.title`).String()
-			log.Printf("⏳ Title check: %s (%ds)", title, (i+1)*2)
+			log.Printf("⏳ Title check: %s (%ds)", title, i+1)
 
 			if title != "Just a moment..." {
 				break
@@ -120,9 +118,6 @@ func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResu
 	}
 
 	log.Printf("✅ Page loaded: %s", title)
-
-	// Wait for content to fully render
-	time.Sleep(1 * time.Second)
 
 	// Get full HTML content
 	html := page.MustHTML()
