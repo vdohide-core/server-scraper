@@ -215,6 +215,8 @@ func (p *PornHubParser) Parse(html string) (map[string]interface{}, error) {
 	})
 
 	// 8. Extract m3u8/mp4 from flashvars_*/mediaDefinitions (only available in browser-rendered HTML)
+	// Pattern: var flashvars_XXXXXX = { ... "mediaDefinitions": [...] ... }
+	// or standalone mediaDefinitions array
 	m3u8Re := regexp.MustCompile(`https?://[^"'\s]+\.m3u8[^"'\s]*`)
 	m3u8Matches := m3u8Re.FindAllString(html, -1)
 	if len(m3u8Matches) > 0 {
@@ -254,6 +256,8 @@ func (p *PornHubParser) Parse(html string) (map[string]interface{}, error) {
 		}
 	}
 
+	// 8. Extract m3u8/mp4 from flashvars_*/mediaDefinitions
+	// Pattern: var flashvars_XXXXX = { ... "mediaDefinitions":[...] ... };
 	// Extract all HLS m3u8 URLs with quality info
 	hlsRe := regexp.MustCompile(`"format"\s*:\s*"hls"\s*,\s*"videoUrl"\s*:\s*"([^"]+)"\s*,\s*"quality"\s*:\s*"(\d+)"`)
 	hlsMatches := hlsRe.FindAllStringSubmatch(html, -1)
@@ -280,10 +284,10 @@ func (p *PornHubParser) Parse(html string) (map[string]interface{}, error) {
 
 	// Also try regex on the full flashvars block for any m3u8 we missed
 	if _, ok := result["m3u8Url"]; !ok {
-		m3u8Re2 := regexp.MustCompile(`https?://[^"'\s\\]+master\.m3u8[^"'\s\\]*`)
-		m3u8Matches2 := m3u8Re2.FindAllString(html, -1)
-		if len(m3u8Matches2) > 0 {
-			result["m3u8Url"] = strings.ReplaceAll(m3u8Matches2[0], `\/`, `/`)
+		m3u8Re := regexp.MustCompile(`https?://[^"'\s\\]+master\.m3u8[^"'\s\\]*`)
+		m3u8Matches := m3u8Re.FindAllString(html, -1)
+		if len(m3u8Matches) > 0 {
+			result["m3u8Url"] = strings.ReplaceAll(m3u8Matches[0], `\/`, `/`)
 		}
 	}
 

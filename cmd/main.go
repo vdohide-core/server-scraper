@@ -4,15 +4,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"server-scraper/internal/config"
 	"server-scraper/internal/db/database"
 	"server-scraper/internal/handlers"
 	"server-scraper/internal/parsers"
-	"server-scraper/internal/scraper"
 
 	"github.com/joho/godotenv"
 )
@@ -32,12 +28,6 @@ func main() {
 	} else {
 		defer database.Disconnect()
 	}
-
-	// Pre-warm headless browser (eliminates cold start per request)
-	if err := scraper.InitBrowser(); err != nil {
-		log.Printf("⚠️ Browser init failed: %v — will retry on first request", err)
-	}
-	defer scraper.CloseBrowser()
 
 	// Initialize parser registry
 	registry := parsers.NewRegistry()
@@ -75,16 +65,6 @@ func main() {
 	fmt.Printf("🌐 Server listening on http://localhost:%s\n", port)
 	fmt.Printf("📡 Scraper endpoint: http://localhost:%s/scraper?url=<URL>\n", port)
 	fmt.Printf("📋 Parsers list: http://localhost:%s/parsers\n", port)
-
-	// Graceful shutdown on SIGINT/SIGTERM
-	go func() {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		<-quit
-		log.Println("⛔ Shutting down...")
-		scraper.CloseBrowser()
-		os.Exit(0)
-	}()
 
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("❌ Server error: %v", err)

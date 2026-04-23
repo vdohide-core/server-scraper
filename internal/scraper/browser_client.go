@@ -3,9 +3,7 @@ package scraper
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -16,18 +14,9 @@ import (
 
 // BrowserResult holds the result from a browser fetch
 type BrowserResult struct {
-	Content string
-	Title   string
-	Cookies []*http.Cookie // CF clearance and session cookies for HTTP client reuse
+	Content string // Full HTML content
+	Title   string // Page title
 }
-
-// ─── Persistent Browser Pool ─────────────────────────────────────────────────
-
-var (
-	globalBrowser *rod.Browser
-	browserMu     sync.Mutex
-	browserOnce   sync.Once
-)
 
 // findChrome finds the Chrome executable on the system
 func findChrome() string {
@@ -41,20 +30,25 @@ func findChrome() string {
 		`/usr/bin/chromium`,
 		`/snap/bin/chromium`,
 	}
+
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
-	return ""
+	return "" // Let rod download its own
 }
 
-// launchBrowser starts a new headless Chrome instance
-func launchBrowser() (*rod.Browser, error) {
+// FetchHTMLWithBrowser uses headless Chrome via rod + stealth to fetch HTML.
+func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResult, error) {
+	log.Printf("🌐 Launching stealth browser for: %s", targetURL)
+
+	// Find system Chrome to avoid downloading Chromium
 	chromePath := findChrome()
 
+	// Create launcher — disable leakless to avoid Windows antivirus false positive
 	l := launcher.New().
-		Leakless(false).
+		Leakless(false). // Disable leakless (causes antivirus issues on Windows)
 		Headless(true).
 		Set("disable-web-security").
 		Set("disable-setuid-sandbox").
@@ -74,101 +68,52 @@ func launchBrowser() (*rod.Browser, error) {
 	}
 
 	browser := rod.New().ControlURL(u).MustConnect()
-	return browser, nil
-}
+	defer browser.MustClose()
 
-// InitBrowser launches the persistent headless browser at startup.
-// Call once from main() to pre-warm Chromium.
-func InitBrowser() error {
-	var initErr error
-	browserOnce.Do(func() {
-		log.Println("🌐 Pre-warming headless Chrome...")
-		b, err := launchBrowser()
-		if err != nil {
-			initErr = err
-			return
-		}
-		globalBrowser = b
-		log.Println("✅ Headless Chrome ready")
-	})
-	return initErr
-}
-
-// getBrowser returns the persistent browser, re-launching if it crashed
-func getBrowser() (*rod.Browser, error) {
-	browserMu.Lock()
-	defer browserMu.Unlock()
-
-	if globalBrowser != nil {
-		// Quick health check
-		if _, err := globalBrowser.Pages(); err == nil {
-			return globalBrowser, nil
-		}
-		log.Println("⚠️ Browser crashed, restarting...")
-		globalBrowser = nil
-	}
-
-	b, err := launchBrowser()
-	if err != nil {
-		return nil, err
-	}
-	globalBrowser = b
-	return b, nil
-}
-
-// CloseBrowser closes the persistent browser. Call from main() on shutdown.
-func CloseBrowser() {
-	browserMu.Lock()
-	defer browserMu.Unlock()
-	if globalBrowser != nil {
-		globalBrowser.MustClose()
-		globalBrowser = nil
-	}
-}
-
-// ─── Fetch ────────────────────────────────────────────────────────────────────
-
-// FetchHTMLWithBrowser uses the persistent headless Chrome to fetch HTML.
-// Reuses the browser instance — no cold start on subsequent requests.
-func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResult, error) {
-	log.Printf("🌐 Browser fetching: %s", targetURL)
-
-	browser, err := getBrowser()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get browser: %w", err)
-	}
-
-	// Open a new stealth page (tab) — fast, no browser restart
+	// Use stealth mode — patches all common bot detection methods
 	page := stealth.MustPage(browser)
 	defer page.MustClose()
 
+	// Set viewport to match the working Puppeteer service
 	page.MustSetViewport(1366, 768, 1.0, false)
+
+	// Set User-Agent
 	page.MustSetUserAgent(&proto.NetworkSetUserAgentOverride{
 		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
 	})
 
+	// Navigate to URL
 	log.Printf("📡 Navigating to: %s", targetURL)
-	if err := page.Timeout(timeout).Navigate(targetURL); err != nil {
+	err = page.Timeout(timeout).Navigate(targetURL)
+	if err != nil {
 		return nil, fmt.Errorf("navigate failed: %w", err)
 	}
 
-	if err := page.Timeout(timeout).WaitStable(500 * time.Millisecond); err != nil {
+	// Wait for page to load
+	err = page.Timeout(timeout).WaitStable(time.Second)
+	if err != nil {
 		log.Printf("⚠️ WaitStable timeout, continuing: %v", err)
 	}
 
+	page.Timeout(timeout).MustWaitLoad()
+
+	// Check for Cloudflare challenge
 	title := page.MustEval(`() => document.title`).String()
 	log.Printf("📄 Page title: %s", title)
 
 	if title == "Just a moment..." {
 		log.Printf("⏳ Cloudflare challenge detected, waiting...")
-		for i := 0; i < 30; i++ {
-			time.Sleep(1 * time.Second)
+
+		for i := 0; i < 15; i++ {
+			time.Sleep(2 * time.Second)
 			title = page.MustEval(`() => document.title`).String()
-			log.Printf("⏳ Title check: %s (%ds)", title, i+1)
+			log.Printf("⏳ Title check: %s (%ds)", title, (i+1)*2)
+
 			if title != "Just a moment..." {
 				break
 			}
 		}
+
 		if title == "Just a moment..." {
 			return nil, fmt.Errorf("cloudflare challenge did not resolve within 30s")
 		}
@@ -176,20 +121,16 @@ func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResu
 
 	log.Printf("✅ Page loaded: %s", title)
 
-	// Extract cookies (CF clearance etc.) for HTTP client reuse
-	var httpCookies []*http.Cookie
-	if cookies, err := page.Cookies([]string{targetURL}); err == nil {
-		for _, c := range cookies {
-			httpCookies = append(httpCookies, &http.Cookie{
-				Name:  c.Name,
-				Value: c.Value,
-			})
-		}
-		log.Printf("🍪 Extracted %d cookies from browser", len(httpCookies))
-	}
+	// Wait for content to fully render
+	time.Sleep(1 * time.Second)
 
+	// Get full HTML content
 	html := page.MustHTML()
+
 	log.Printf("📦 Browser fetched %d bytes from %s", len(html), targetURL)
 
-	return &BrowserResult{Content: html, Title: title, Cookies: httpCookies}, nil
+	return &BrowserResult{
+		Content: html,
+		Title:   title,
+	}, nil
 }

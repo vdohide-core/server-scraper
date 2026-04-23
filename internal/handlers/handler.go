@@ -13,14 +13,12 @@ import (
 )
 
 type Handler struct {
-	registry   *parsers.ParserRegistry
-	httpClient *scraper.HTMLClient // persistent — CF clearance cookies survive across requests
+	registry *parsers.ParserRegistry
 }
 
 func NewHandler(registry *parsers.ParserRegistry) *Handler {
 	return &Handler{
-		registry:   registry,
-		httpClient: scraper.NewHTMLClient(), // created once, cookie jar shared
+		registry: registry,
 	}
 }
 
@@ -85,9 +83,9 @@ func (h *Handler) Scraper(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if parser.NeedsHTML() {
-		// Parser needs HTML — fetch it first using the persistent HTTP client.
-		// CF clearance cookies from previous browser bypasses are reused here.
-		html, fetchErr := h.httpClient.FetchHTMLWithRetry(normalizedURL, 3)
+		// Parser needs HTML — fetch it first, then parse
+		client := scraper.NewHTMLClient()
+		html, fetchErr := client.FetchHTMLWithRetry(normalizedURL, 3)
 		if fetchErr != nil {
 			log.Printf("❌ Fetch error: %v", fetchErr)
 			respondError(w, fmt.Sprintf("Failed to fetch HTML: %v", fetchErr), http.StatusInternalServerError)
