@@ -4,8 +4,6 @@ go 1.24
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/go-rod/rod v0.116.2
-	github.com/go-rod/stealth v0.4.9
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	go.mongodb.org/mongo-driver v1.17.0
@@ -13,6 +11,8 @@ require (
 
 require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
+	github.com/go-rod/rod v0.116.2 // indirect
+	github.com/go-rod/stealth v0.4.9 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/klauspost/compress v1.13.6 // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
