@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Defaults
-HTTP_PORT="8081"
+PORT="8081"
 UNINSTALL=false
 MONGODB_URI=""
 
@@ -30,7 +30,7 @@ print_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 while [[ $# -gt 0 ]]; do
     case $1 in
         --uninstall)    UNINSTALL=true; shift ;;
-        -p|--port)      HTTP_PORT="$2"; shift 2 ;;
+        -p|--port)      PORT="$2"; shift 2 ;;
         --mongodb-uri)  MONGODB_URI="$2"; shift 2 ;;
         -h|--help)
             echo "Server Scraper Installer"
@@ -78,7 +78,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 print_status "🚀 Starting Installation..."
-print_status "Configuration: Port=$HTTP_PORT"
+print_status "Configuration: Port=$PORT"
 
 # ─── System Dependencies ──────────────────────────────────────
 print_status "Installing system dependencies (curl, chromium)..."
@@ -119,7 +119,7 @@ print_status "Binary downloaded."
 # ─── Create .env ─────────────────────────────────────────────
 print_status "Creating .env file..."
 cat > "$APP_DIR/.env" <<EOF
-HTTP_PORT=$HTTP_PORT
+PORT=$PORT
 MONGODB_URI=$MONGODB_URI
 EOF
 
@@ -158,11 +158,11 @@ if systemctl is-active --quiet ${SERVICE_NAME}; then
     echo "============================================"
     echo ""
     echo "  Service:  $SERVICE_NAME"
-    echo "  Port:     $HTTP_PORT"
+    echo "  Port:     $PORT"
     echo ""
-    echo "  Health:   http://localhost:$HTTP_PORT/health"
-    echo "  Scraper:  http://localhost:$HTTP_PORT/scraper?url=<URL>"
-    echo "  Parsers:  http://localhost:$HTTP_PORT/parsers"
+    echo "  Health:   http://localhost:$PORT/health"
+    echo "  Scraper:  http://localhost:$PORT/scraper?url=<URL>"
+    echo "  Parsers:  http://localhost:$PORT/parsers"
     echo ""
     echo "  Commands:"
     echo "    systemctl status $SERVICE_NAME"
