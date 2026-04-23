@@ -3,6 +3,7 @@ package scraper
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 type BrowserResult struct {
 	Content string
 	Title   string
+	Cookies []*http.Cookie // CF clearance and session cookies for HTTP client reuse
 }
 
 // ─── Persistent Browser Pool ─────────────────────────────────────────────────
@@ -174,8 +176,20 @@ func FetchHTMLWithBrowser(targetURL string, timeout time.Duration) (*BrowserResu
 
 	log.Printf("✅ Page loaded: %s", title)
 
+	// Extract cookies (CF clearance etc.) for HTTP client reuse
+	var httpCookies []*http.Cookie
+	if cookies, err := page.Cookies([]string{targetURL}); err == nil {
+		for _, c := range cookies {
+			httpCookies = append(httpCookies, &http.Cookie{
+				Name:  c.Name,
+				Value: c.Value,
+			})
+		}
+		log.Printf("🍪 Extracted %d cookies from browser", len(httpCookies))
+	}
+
 	html := page.MustHTML()
 	log.Printf("📦 Browser fetched %d bytes from %s", len(html), targetURL)
 
-	return &BrowserResult{Content: html, Title: title}, nil
+	return &BrowserResult{Content: html, Title: title, Cookies: httpCookies}, nil
 }

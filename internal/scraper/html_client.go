@@ -18,11 +18,11 @@ import (
 // HTMLClient handles HTML fetching with browser-like headers
 type HTMLClient struct {
 	httpClient *http.Client
+	cookieJar  *cookiejar.Jar
 }
 
 // NewHTMLClient creates a new HTML client
 func NewHTMLClient() *HTMLClient {
-	// Create cookie jar for session handling
 	jar, _ := cookiejar.New(nil)
 
 	timeout := time.Duration(config.AppConfig.HTTPTimeout) * time.Second
@@ -31,6 +31,7 @@ func NewHTMLClient() *HTMLClient {
 	}
 
 	return &HTMLClient{
+		cookieJar: jar,
 		httpClient: &http.Client{
 			Timeout: timeout,
 			Jar:     jar,
@@ -106,6 +107,8 @@ func (c *HTMLClient) FetchHTML(targetURL string) (string, error) {
 
 // FetchHTMLWithRetry fetches HTML with retry logic.
 // If all retries fail with 403, it falls back to headless Chrome.
+// After a successful browser bypass, CF clearance cookies are injected
+// into this client's cookie jar so future HTTP requests skip the browser.
 func (c *HTMLClient) FetchHTMLWithRetry(targetURL string, maxRetries int) (string, error) {
 	var lastErr error
 	got403 := false
@@ -138,6 +141,17 @@ func (c *HTMLClient) FetchHTMLWithRetry(targetURL string, maxRetries int) (strin
 		if err != nil {
 			return "", fmt.Errorf("browser fallback also failed: %w (original: %v)", err, lastErr)
 		}
+
+		// Inject CF clearance cookies from browser into HTTP cookie jar
+		// so future HTTP requests to the same domain skip the browser entirely
+		if result.Cookies != nil && c.cookieJar != nil {
+			parsedURL, parseErr := url.Parse(targetURL)
+			if parseErr == nil {
+				c.cookieJar.SetCookies(parsedURL, result.Cookies)
+				log.Printf("🍪 Injected %d CF cookies into HTTP jar", len(result.Cookies))
+			}
+		}
+
 		return result.Content, nil
 	}
 
