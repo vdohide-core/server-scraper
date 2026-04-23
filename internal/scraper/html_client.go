@@ -1,16 +1,19 @@
 package scraper
 
 import (
+	"bufio"
 	"compress/gzip"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"server-scraper/internal/config"
 )
@@ -35,11 +38,57 @@ func NewHTMLClient() *HTMLClient {
 		httpClient: &http.Client{
 			Timeout: timeout,
 			Jar:     jar,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			Transport: &utlsRoundTripper{
+				helloID: utls.HelloChrome_131,
 			},
 		},
 	}
+}
+
+// utlsRoundTripper impersonates Chrome's TLS fingerprint (JA3/JA3S)
+// so Cloudflare passes the request as if it came from a real browser.
+type utlsRoundTripper struct {
+	helloID utls.ClientHelloID
+}
+
+func (rt *utlsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		// Non-TLS: fall back to plain transport
+		return http.DefaultTransport.RoundTrip(req)
+	}
+
+	addr := req.URL.Hostname()
+	port := req.URL.Port()
+	if port == "" {
+		port = "443"
+	}
+
+	tcpConn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, port), 15*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("tcp dial: %w", err)
+	}
+
+	tlsConn := utls.UClient(tcpConn, &utls.Config{
+		ServerName: addr,
+	}, rt.helloID)
+
+	if err := tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("utls handshake: %w", err)
+	}
+
+	// Send HTTP/1.1 request over the uTLS connection
+	if err := req.Write(tlsConn); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("request write: %w", err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(tlsConn), req)
+	if err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return resp, nil
 }
 
 // FetchHTML fetches HTML content from the given URL
